@@ -15,6 +15,140 @@ type Org struct{
 	Members	map[string]sl.User
 }
 
+var OrgTracker = sl.MessageHandler{
+	Name: `OrgTracker`,
+	Usage:`<botname> [add|delete|join|leave|list] org <orgname>`,
+	Method: `RESPOND`,
+	Pattern: `(?i)(add|delete|join|leave|list) org *(\w*)`,
+	Run:	func(e *sl.Event, match []string){
+		var orgName, orgID string
+		cmd := match[1]
+		if len(match) >= 2{
+			orgName = match[2]
+			orgID = strings.ToLower(orgName)
+		}
+		orgs, err := getOrgs(e.Sbot) 
+		if err != nil{
+			e.Respond(fmt.Sprintf("ack! I couldn't load my orgs struct! %s", err))
+			sl.Logger.Debug(err)
+			return
+		}
+		if isAdd,_ := regexp.MatchString( `(?i)add`, cmd); isAdd{
+			if err := addOrg(e.Sbot,orgs,orgID); err!=nil{
+				e.Reply(fmt.Sprintf("sorry I couldn't add %s because: %s", orgName, err))
+				return
+			}
+			e.Reply(fmt.Sprintf("sure thing. Org: %s added", orgName))
+			return
+		}else if isDel,_ := regexp.MatchString( `(?i)delete`, cmd); isDel{
+			if err := deleteOrg(e.Sbot,orgs,orgID); err!=nil{
+				e.Reply(fmt.Sprintf("gar. %s", err))
+				return
+			}
+			e.Reply(fmt.Sprintf("Ok. Org: %s deleted", orgName))
+			return
+		}else if isJoin,_ := regexp.MatchString( `(?i)join`, cmd); isJoin{
+			if _, exists := orgs[orgID]; !exists{
+				e.Reply(fmt.Sprintf("(Creating new org: %s first)",orgName))
+				if err := addOrg(e.Sbot,orgs,orgID); err!=nil{
+					e.Reply(fmt.Sprintf("sorry I couldn't add %s because: %s", orgName, err))
+					return
+				}
+			}
+			if err := joinOrg(e,orgs,orgID); err!=nil{
+					e.Reply(fmt.Sprintf("derp. %s", err))
+					return
+			}
+			user:=e.Sbot.Meta.GetUser(e.User)
+			e.Reply(fmt.Sprintf("OK! user: %s now belongs to %s",user.Name, orgName))
+			return
+		}else if isLeave,_ := regexp.MatchString( `(?i)leave`, cmd); isLeave{
+			if err := leaveOrg(e,orgs,orgID); err!=nil{
+					e.Reply(fmt.Sprintf("bleh. %s", err))
+					return
+			}
+			user:=e.Sbot.Meta.GetUser(e.User)
+			e.Reply(fmt.Sprintf("OK! removed user: %s from org: %s",user.Name, orgName))
+			return
+		}else if isList,_ := regexp.MatchString( `(?i)list`, cmd); isList{
+			if reply, err := listOrg(orgs,orgID); err!=nil{
+				e.Reply(fmt.Sprintf("sorry. %s", err))
+				return
+			}else{
+				e.Reply(reply)
+				return
+			}
+		}
+	},
+}
+
+func listOrg(orgs map[string]Org, orgID string) (string, error){
+	if orgID != ``{
+		if org, exists := orgs[orgID]; exists{
+			users := fmt.Sprintf("Members from %s:\n",orgID)
+			for _,peep := range org.Members{	
+				users = fmt.Sprintf("%s\n%s", users, peep.Name)
+			}
+			return users, nil
+		}else{
+			return ``,fmt.Errorf("no org called: %s", orgID)
+		}
+	}else{
+		reply:=`Existing Orgs:`
+		for orgid,org := range orgs{
+			reply=fmt.Sprintf("%s\n%s, (%d members)",reply, orgid, len(org.Members))
+		}
+		return reply,nil
+	}
+}
+
+func addOrg(bot *sl.Sbot, orgs map[string]Org, orgID string) error{
+	newOrg:=Org{
+		Name:	orgID,
+		Members: make(map[string]sl.User),
+	}
+	orgs[orgID] = newOrg
+	if err := setOrgs(bot, orgs); err != nil{
+		return fmt.Errorf("I couldn't add %s because my brain says: %s", orgID, err)
+	}
+	return nil
+}
+
+func deleteOrg(bot *sl.Sbot, orgs map[string]Org, orgID string) error{
+	delete(orgs,orgID)
+	if err := setOrgs(bot, orgs); err != nil{
+		return fmt.Errorf("I couldn't delete %s because my brain says: %s", orgID, err)
+	}
+	return nil
+}
+
+func joinOrg(e *sl.Event, orgs map[string]Org, orgID string) error{
+	user := e.Sbot.Meta.GetUser(e.User)
+	org := orgs[orgID]
+	if _,exists := org.Members[user.ID]; exists{
+		return fmt.Errorf("user: %s already belongs to %s (sorry)",user.Name, orgID)
+	}else{
+		org.Members[user.ID] = *user
+		if err := setOrgs(e.Sbot, orgs); err != nil{
+			return fmt.Errorf("I couldn't add %s. Brain trouble: %s", user.Name, err)
+		}
+		return nil
+	}
+}
+
+func leaveOrg(e *sl.Event, orgs map[string]Org, orgID string) error{
+	if org,exists := orgs[orgID]; exists{ 
+		user:=e.Sbot.Meta.GetUser(e.User)
+		delete (org.Members,user.ID)
+		if err := setOrgs(e.Sbot, orgs); err != nil{
+			return fmt.Errorf("I couldn't delete %s. Brain trouble: %s", user.Name, err)
+		}
+		return nil
+	}else{
+		return fmt.Errorf("No such org: %s (sorry)",orgID)
+	}
+}
+
 func getOrgs(bot *sl.Sbot) (map[string]Org, error){
 // load in the orgs struct from brain
  	orgs := make(map[string]Org)
@@ -41,11 +175,11 @@ func setOrgs(bot *sl.Sbot, orgs map[string]Org) error{
 	return nil
 }
 
-var QueryPeeps = sl.MessageHandler{
-	Name: `OrgTracker, Query Peeps`,
-	Usage:`"<botname> who is from <orgname>" returns the users from <orgname>`,
+var WhoIsFrom = sl.MessageHandler{
+	Name: `OrgTracker: Who-IS-FROM`,
+	Usage:`"<botname> who is from <org>" :: lists members who are from org`,
 	Method: `RESPOND`,
-	Pattern: `(?i)who is from (\w+)`,
+	Pattern: `(?i)who is from (\w*)`,
 	Run:	func(e *sl.Event, match []string){
 		orgName := match[1]
 		orgID := strings.ToLower(orgName)
@@ -55,131 +189,13 @@ var QueryPeeps = sl.MessageHandler{
 			sl.Logger.Debug(err)
 			return
 		}
-
-		if org, exists := orgs[orgID]; exists{
-			users := fmt.Sprintf("Members from %s:\n",orgName)
-			for _,peep := range org.Members{	
-				users = fmt.Sprintf("%s\n%s", users, peep.Name)
-			}
-			e.Respond(users)	
+		if reply, err := listOrg(orgs,orgID); err!=nil{
+			e.Reply(fmt.Sprintf("sorry. %s", err))
 			return
 		}else{
-			e.Respond(fmt.Sprintf("sorry, no org called: %s", orgName))
+			e.Reply(reply)
 			return
 		}
 	},
 }
 
-var ManageOrg = sl.MessageHandler{
-	Name: `OrgTracker: Manage Org`,
-	Usage:`"<botname> (add|delete) org <orgname>" adds or deletes an org called <orgname>`,
-	Method: `RESPOND`,
-	Pattern: `(?i)(add|delete) org (\w+)`,
-	Run:	func(e *sl.Event, match []string){
-		cmd:=match[1]
-		orgName:=match[2]
-		orgID := strings.ToLower(orgName)
-		orgs, err := getOrgs(e.Sbot) 
-		if err != nil{
-			e.Respond(fmt.Sprintf("ack! I couldn't load my orgs struct! %s", err))
-			sl.Logger.Debug(err)
-			return
-		}
-
-		if isAdd,_ := regexp.MatchString( `(?i)add`, cmd); isAdd{
-			newOrg:=Org{
-				Name:	strings.ToLower(orgName),
-				Members: make(map[string]sl.User),
-			}
-			orgs[orgID] = newOrg
-			if err := setOrgs(e.Sbot, orgs); err != nil{
-				e.Reply(fmt.Sprintf("sorry I couldn't add %s because my brain says: %s", orgName, err))
-				return
-			}
-			e.Reply(fmt.Sprintf("sure thing. Org: %s added", orgName))
-		}
-
-		if isDelete,_ := regexp.MatchString( `(?i)delete`, cmd); isDelete{
-			delete(orgs,orgID)
-			if err := setOrgs(e.Sbot, orgs); err != nil{
-				e.Reply(fmt.Sprintf("blerg, couldn't delete %s because my brain says: %s", orgName, err))
-				return
-			}
-
-			e.Reply(fmt.Sprintf("sure thing. Org: %s deleted", orgName))
-		}
-	},
-}
-
-var JoinOrg = sl.MessageHandler{
-	Name: `OrgTracker: Join Org`,
-	Usage:`"<botname> (join|leave) org <orgname>" adds or removes you to/from <orgname>`,
-	Method: `RESPOND`,
-	Pattern: `(?i)(join|leave) org (\w+)`,
-	Run:	func(e *sl.Event, match []string){
-		cmd:=match[1]
-		orgName:=match[2]
-		orgID := strings.ToLower(orgName)
-		var org Org
-		var exists bool
-
-		orgs, err := getOrgs(e.Sbot) 
-		if err != nil{
-			e.Respond(fmt.Sprintf("ack! I couldn't load my orgs struct! %s", err))
-			sl.Logger.Debug(err)
-			return
-		}
-
-		if isJoin,_ := regexp.MatchString( `(?i)join`, cmd); isJoin{
-			if org, exists = orgs[orgID]; !exists{
-				e.Reply(fmt.Sprintf("(Creating new org: %s first)",orgName))
-				org=Org{
-					Name:	strings.ToLower(orgName),
-					Members: make(map[string]sl.User),
-				}
-				orgs[orgID]=org
-			}
-			user:=e.Sbot.Meta.GetUser(e.User)
-			if _,exists := org.Members[user.ID]; exists{
-				e.Reply(fmt.Sprintf("user: %s already belongs to %s (sorry)",user.Name, orgName))
-			}else{
-				org.Members[user.ID] = *user
-				if err := setOrgs(e.Sbot, orgs); err != nil{
-					e.Reply(fmt.Sprintf("derp.. I couldn't add %s. Brain trouble: %s", user.Name, err))
-					return
-				}
-				e.Reply(fmt.Sprintf("OK! user: %s now belongs to %s",user.Name, orgName))
-				return
-			}
-		}
-		if isLeave,_ := regexp.MatchString( `(?i)leave`, cmd); isLeave{
-			if org,exists := orgs[orgID]; exists{ 
-				user:=e.Sbot.Meta.GetUser(e.User)
-				delete (org.Members,user.ID)
-				e.Reply(fmt.Sprintf("OK! %s is no longer in %s",user.Name, orgName))
-			}else{
-				e.Reply(fmt.Sprintf("No such org: %s (sorry)",orgName))
-			}
-		}
-	},
-}
-
-var ListOrgs = sl.MessageHandler{
-	Name: `OrgTracker: List Orgs`,
-	Usage:`"<botname> list orgs" lists the available orgs`,
-	Method: `RESPOND`,
-	Pattern: `(?i)list orgs`,
-	Run:	func(e *sl.Event, match []string){
-		orgs, err := getOrgs(e.Sbot) 
-		if err != nil{
-			e.Respond(fmt.Sprintf("ack! I couldn't load my orgs struct! %s", err))
-			sl.Logger.Debug(err)
-			return
-		}
-		reply:=`Existing Orgs:`
-		for orgid,org := range orgs{
-			reply=fmt.Sprintf("%s\n%s, (%d members)",reply, orgid, len(org.Members))
-		}
-		e.Reply(reply)
-	},
-}
