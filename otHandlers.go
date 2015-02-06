@@ -19,7 +19,7 @@ var OrgTracker = sl.MessageHandler{
 	Name: `OrgTracker`,
 	Usage:`<botname> [add|delete|join|leave|list] org <orgname>`,
 	Method: `RESPOND`,
-	Pattern: `(?i)(add|delete|join|leave|list) org *(\w*)`,
+	Pattern: `(?i)(add|delete|join|leave|list) orgs* *(\w*)`,
 	Run:	func(e *sl.Event, match []string){
 		var orgName, orgID string
 		cmd := match[1]
