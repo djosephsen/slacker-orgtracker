@@ -120,6 +120,8 @@ var JoinOrg = sl.MessageHandler{
 		cmd:=match[1]
 		orgName:=match[2]
 		orgID := strings.ToLower(orgName)
+		var org Org
+		var exists bool
 
 		orgs, err := getOrgs(e.Sbot) 
 		if err != nil{
@@ -129,21 +131,25 @@ var JoinOrg = sl.MessageHandler{
 		}
 
 		if isJoin,_ := regexp.MatchString( `(?i)join`, cmd); isJoin{
-			if org, exists := orgs[orgID]; exists{
-				user:=e.Sbot.Meta.GetUser(e.User)
-				if _,exists := org.Members[user.ID]; exists{
-					e.Reply(fmt.Sprintf("user: %s already belongs to %s (sorry)",user.Name, orgName))
-				}else{
-					org.Members[user.ID] = *user
-					if err := setOrgs(e.Sbot, orgs); err != nil{
-						e.Reply(fmt.Sprintf("derp.. I couldn't add %s. Brain trouble: %s", user.Name, err))
-						return
-					}
-					e.Reply(fmt.Sprintf("OK! user: %s now belongs to %s",user.Name, orgName))
+			if org, exists = orgs[orgID]; !exists{
+				e.Reply(fmt.Sprintf("(Creating new org: %s first)",orgName))
+				org=Org{
+					Name:	strings.ToLower(orgName),
+					Members: make(map[string]sl.User),
+				}
+				orgs[orgID]=org
+			}
+			user:=e.Sbot.Meta.GetUser(e.User)
+			if _,exists := org.Members[user.ID]; exists{
+				e.Reply(fmt.Sprintf("user: %s already belongs to %s (sorry)",user.Name, orgName))
+			}else{
+				org.Members[user.ID] = *user
+				if err := setOrgs(e.Sbot, orgs); err != nil{
+					e.Reply(fmt.Sprintf("derp.. I couldn't add %s. Brain trouble: %s", user.Name, err))
 					return
 				}
-			}else{
-				e.Reply(fmt.Sprintf("No such org: %s (sorry)",orgName))
+				e.Reply(fmt.Sprintf("OK! user: %s now belongs to %s",user.Name, orgName))
+				return
 			}
 		}
 		if isLeave,_ := regexp.MatchString( `(?i)leave`, cmd); isLeave{
@@ -155,5 +161,25 @@ var JoinOrg = sl.MessageHandler{
 				e.Reply(fmt.Sprintf("No such org: %s (sorry)",orgName))
 			}
 		}
+	},
+}
+
+var ListOrgs = sl.MessageHandler{
+	Name: `OrgTracker: List Orgs`,
+	Usage:`"<botname> list orgs" lists the available orgs`,
+	Method: `RESPOND`,
+	Pattern: `(?i)list orgs`,
+	Run:	func(e *sl.Event, match []string){
+		orgs, err := getOrgs(e.Sbot) 
+		if err != nil{
+			e.Respond(fmt.Sprintf("ack! I couldn't load my orgs struct! %s", err))
+			sl.Logger.Debug(err)
+			return
+		}
+		reply:=`Existing Orgs:`
+		for orgid,org := range orgs{
+			reply=fmt.Sprintf("%s\n%s, (%d members)",reply, orgid, len(org.Members))
+		}
+		e.Reply(reply)
 	},
 }
