@@ -149,6 +149,39 @@ func leaveOrg(e *sl.Event, orgs map[string]Org, orgID string) error{
 	}
 }
 
+func addUserToOrg(e *sl.Event, orgs map[string]Org, usr string, orgID string) error{
+	user := e.Sbot.Meta.GetUserByName(usr)
+	if user == nil{
+		return fmt.Errorf("I couldn't find a user named: %s", usr)
+	}
+	org := orgs[orgID]
+	if _,exists := org.Members[user.ID]; exists{
+		return fmt.Errorf("user: %s already belongs to %s (sorry)",user.Name, orgID)
+	}else{
+		org.Members[user.ID] = *user
+		if err := setOrgs(e.Sbot, orgs); err != nil{
+			return fmt.Errorf("I couldn't add %s. Brain trouble: %s", user.Name, err)
+		}
+		return nil
+	}
+}
+
+func deleteUserFromOrg(e *sl.Event, orgs map[string]Org, usr string, orgID string) error{
+	if org,exists := orgs[orgID]; exists{ 
+		if user := e.Sbot.Meta.GetUserByName(usr); user == nil{
+			delete (org.Members,user.ID)
+			if err := setOrgs(e.Sbot, orgs); err != nil{
+				return fmt.Errorf("I couldn't delete %s. Brain trouble: %s", user.Name, err)
+			}
+			return nil
+		}else{
+			return fmt.Errorf("No such user: %s (sorry)",usr)
+		}
+	}else{
+		return fmt.Errorf("No such org: %s (sorry)",orgID)
+	}
+}
+
 func getOrgs(bot *sl.Sbot) (map[string]Org, error){
 // load in the orgs struct from brain
  	orgs := make(map[string]Org)
@@ -199,3 +232,38 @@ var WhoIsFrom = sl.MessageHandler{
 	},
 }
 
+var OTUserManage = sl.MessageHandler{
+	Name: `OrgTracker: User Manage`,
+	Usage:`"<botname> (add|delete) <user> (to|from) org <org>" :: adds or deletes person to org`,
+	Method: `RESPOND`,
+	Pattern: `(?i)(add|delete) (\w*) (to|from) org (\w*)`,
+	Run:	func(e *sl.Event, match []string){
+		cmd := match[1]
+		userName := match[2]
+		orgName := match[4]
+		orgID := strings.ToLower(orgName)
+		orgs, err := getOrgs(e.Sbot) 
+		if err != nil{
+			e.Respond(fmt.Sprintf("ack! I couldn't load my orgs struct! %s", err))
+			sl.Logger.Debug(err)
+			return
+		}
+		if isAdd,_ := regexp.MatchString( `(?i)add`, cmd); isAdd{
+			if err := addUserToOrg(e,orgs,userName,orgID); err!=nil{
+				e.Reply(fmt.Sprintf("sorry, %s", err))
+				return
+			}
+			e.Reply(fmt.Sprintf("Ok. %s added to %s", userName, orgName))
+			return
+		}else if isDelete,_ := regexp.MatchString( `(?i)delete`, cmd); isDelete{
+			if err := deleteUserFromOrg(e,orgs,userName,orgID); err!=nil{
+				e.Reply(fmt.Sprintf("bummer. %s", err))
+				return
+			}
+			e.Reply(fmt.Sprintf("Ok. %s deleted from %s", userName, orgName))
+			return
+		}else{
+			sl.Logger.Error(`OT:: Got a wierd cmd in user manage: `, cmd)
+		}
+	},
+}
