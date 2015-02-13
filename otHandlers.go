@@ -187,8 +187,7 @@ func getOrgs(bot *sl.Sbot) (map[string]Org, error){
  	orgs := make(map[string]Org)
 	brain := *bot.Brain
 	if orgson, err := brain.Get(ORGS); err != nil{
-		//if notFound,_ := regexp.MatchString(
-		if err.Error() != `key OT:ORGS was not found`{
+		if notFound,_ := regexp.MatchString(`ORGS.*not.*found`,err.Error()); !notFound{
 			return orgs, err
 		}
 	}else if err := json.Unmarshal(orgson, &orgs); err != nil{
@@ -249,6 +248,13 @@ var OTUserManage = sl.MessageHandler{
 			return
 		}
 		if isAdd,_ := regexp.MatchString( `(?i)add`, cmd); isAdd{
+			if _, exists := orgs[orgID]; !exists{
+				e.Reply(fmt.Sprintf("(Creating new org: %s first)",orgName))
+				if err := addOrg(e.Sbot,orgs,orgID); err!=nil{
+					e.Reply(fmt.Sprintf("sorry I couldn't add %s because: %s", orgName, err))
+					return
+				}
+			}
 			if err := addUserToOrg(e,orgs,userName,orgID); err!=nil{
 				e.Reply(fmt.Sprintf("sorry, %s", err))
 				return
