@@ -102,6 +102,21 @@ func listOrg(orgs map[string]Org, orgID string) (string, error){
 	}
 }
 
+func listFrom(bot *sl.Sbot, orgs map[string]Org, usr string) (string, error){
+	if user := bot.Meta.GetUserByName(usr); user != nil{
+		reply:=fmt.Sprintf("The following orgs are lucky enough to have %s's help:",user.Name)
+		for _, org := range orgs{
+			if _,isAMember := org.Members[user.ID]; isAMember{
+				reply=fmt.Sprintf("%s\n%s",reply,org.Name)
+			}
+		}
+		return reply,nil
+	}else{
+		return ``,fmt.Errorf("I don't know anyone named: %s", usr)
+	}
+}
+					
+
 func addOrg(bot *sl.Sbot, orgs map[string]Org, orgID string) error{
 	newOrg:=Org{
 		Name:	orgID,
@@ -230,6 +245,30 @@ var WhoIsFrom = sl.MessageHandler{
 		}
 	},
 }
+
+var WhereIsFrom = sl.MessageHandler{
+	Name: `OrgTracker: Where-IS-FROM`,
+	Usage:`"<botname> where is <user> from?" :: lists orgs that user belongs to`,
+	Method: `RESPOND`,
+	Pattern: `(?i)where is (\w*) from`,
+	Run:	func(e *sl.Event, match []string){
+		userName := match[1]
+		orgs, err := getOrgs(e.Sbot) 
+		if err != nil{
+			e.Respond(fmt.Sprintf("ack! I couldn't load my orgs struct! %s", err))
+			sl.Logger.Debug(err)
+			return
+		}
+		if reply, err := listFrom(e.Sbot,orgs,userName); err!=nil{
+			e.Reply(fmt.Sprintf("sorry. %s", err))
+			return
+		}else{
+			e.Reply(reply)
+			return
+		}
+	},
+}
+
 
 var OTUserManage = sl.MessageHandler{
 	Name: `OrgTracker: User Manage`,
